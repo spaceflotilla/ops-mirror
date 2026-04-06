@@ -4,6 +4,8 @@ Monorepo for **deploy orchestrator** (GitLab webhooks → registry + stub “dep
 
 GitLab is **repos + SCM only** — no `.gitlab-ci.yml` required for this flow.
 
+**Railway / public CI:** If `gitlab.flotilla.space` is not reachable from the internet (e.g. VPN-only), mirror this repo to **GitHub** and connect Railway to GitHub. See [`docs/GITHUB_MIRROR.md`](docs/GITHUB_MIRROR.md).
+
 ## What you need to provide
 
 | Item | Purpose |
