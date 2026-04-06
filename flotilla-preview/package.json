@@ -1,0 +1,20 @@
+{
+  "name": "flotilla-preview",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "services/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:orchestrator": "npm run dev -w @flotilla/orchestrator",
+    "dev:router": "npm run dev -w @flotilla/router",
+    "dev:dashboard": "npm run dev -w @flotilla/dashboard",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "new-branch": "node scripts/new-preview-branch.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}

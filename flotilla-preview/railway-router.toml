@@ -1,0 +1,12 @@
+# Copy this file to railway.toml in ops/flotilla-preview when linked to the
+# **preview-router** Railway service (separate Railway service from orchestrator),
+# or paste equivalent settings in the dashboard.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "docker/router.Dockerfile"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"

@@ -1,0 +1,8 @@
+# Optional — future orchestrator will read this to build & deploy previews.
+# MVP orchestrator ignores this file.
+
+version: 1
+framework: vite
+install: npm ci
+build: npm run build
+output: dist

@@ -1,0 +1,15 @@
+# Copy this file to railway.toml in ops/flotilla-preview when linked to the
+# **orchestrator** Railway service, or paste equivalent settings in the dashboard.
+#
+# Railway: add a **volume** mount for persistent registry data:
+#   Mount path: /app/data
+#   (Keeps registry.json across deploys; see README and FLOTILLA_DEVOPS_PIPELINE_PLAN.md)
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "docker/orchestrator.Dockerfile"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"

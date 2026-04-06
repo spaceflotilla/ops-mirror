@@ -1,0 +1,10 @@
+{
+  "_readme": "path_with_namespace for site repos; override with env GITLAB_SITE_PROJECTS=comma,separated",
+  "projects": [
+    "web/landing-page",
+    "web/trades",
+    "web/orbit",
+    "web/react_deck",
+    "web/astrolabe"
+  ]
+}
