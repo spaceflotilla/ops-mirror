@@ -1,6 +1,10 @@
-# Mirror `web/ops` to GitHub (for Railway and other public CI)
+# Mirror `web/ops` to GitHub (for Railway and hosted CI)
 
 Self-hosted GitLab at `gitlab.flotilla.space` may be unreachable from Railway’s builders if it is VPN-only or not on the public internet. **GitHub** is usually reachable everywhere, so point **Railway at the GitHub mirror** and keep **GitLab as the place you push to day to day**.
+
+## Keeping the mirror private
+
+The GitHub repo does **not** need to be public. Create it as **private** (or change visibility under repo **Settings → General**). Your PAT and Railway’s GitHub app must have access to that private repo (`repo` scope / fine-grained **Contents** on that repository; Railway **Configure** → grant access to selected private repos). Code stays private on both GitLab and GitHub; Railway only reads what you authorize.
 
 ## Recommended: GitLab “push” mirror → GitHub
 
@@ -8,7 +12,7 @@ GitLab pushes to GitHub whenever the GitLab repo updates (including new commits 
 
 ### 1. Create an empty GitHub repository
 
-- GitHub → **New repository** (e.g. `ops` under your org or user).
+- GitHub → **New repository** (e.g. `ops` under your org or user). Use **Private** if you do not want the code world-readable.
 - **Do not** add README, `.gitignore`, or license (avoids merge conflicts with your existing history).
 
 ### 2. Create a GitHub Personal Access Token (PAT)
