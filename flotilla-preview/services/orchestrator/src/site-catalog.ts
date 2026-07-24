@@ -87,9 +87,31 @@ export async function getSiteCatalog(
     return data;
   }
 
+  // Railway (public cloud) cannot resolve VPN-only / private DNS for GitLab.
+  if (process.env.GITLAB_CATALOG_DISABLED === "1") {
+    const data: SiteCatalogResponse = {
+      gitlabConfigured: true,
+      gitlabBaseUrl,
+      refreshedAt: new Date().toISOString(),
+      projects: paths.map((path) => ({
+        path,
+        branches: [],
+      })),
+      message:
+        "Site branch listing is disabled (GITLAB_CATALOG_DISABLED=1). Use the Previews tab — entries appear when GitLab webhooks fire. GitLab → Railway webhooks still work without public DNS.",
+    };
+    cache = { expires: now + TTL_MS, data };
+    return data;
+  }
+
   const projects: SiteProjectCatalog[] = [];
+  let dnsFailure: string | null = null;
 
   for (const path of paths) {
+    if (dnsFailure) {
+      projects.push({ path, branches: [], error: dnsFailure });
+      continue;
+    }
     try {
       const meta = await fetchProject(path);
       const rawBranches = await fetchBranches(path);
@@ -130,6 +152,12 @@ export async function getSiteCatalog(
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      if (/ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(msg)) {
+        dnsFailure =
+          "GitLab hostname is not reachable from Railway (private/VPN DNS). Webhooks still work. Use the Previews tab for live entries, or expose GitLab via tunnel/public DNS for this catalog.";
+        projects.push({ path, branches: [], error: dnsFailure });
+        continue;
+      }
       projects.push({
         path,
         error: msg,
@@ -143,6 +171,9 @@ export async function getSiteCatalog(
     gitlabBaseUrl,
     refreshedAt: new Date().toISOString(),
     projects,
+    message: dnsFailure
+      ? "Site branches need public DNS to gitlab.flotilla.space from Railway. Switch to Previews for webhook-registered environments."
+      : undefined,
   };
   cache = { expires: now + TTL_MS, data };
   return data;

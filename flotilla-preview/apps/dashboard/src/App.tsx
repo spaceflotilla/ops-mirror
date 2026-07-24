@@ -399,19 +399,20 @@ export function App() {
                                   <>
                                     <a
                                       className="link"
-                                      href={`${basePath}/${b.slug}/`}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                    >
-                                      Site path
-                                    </a>
-                                    <a
-                                      className="link secondary"
                                       href={b.preview.targetUrl}
                                       target="_blank"
                                       rel="noreferrer"
                                     >
-                                      Target
+                                      Open preview
+                                    </a>
+                                    <a
+                                      className="link secondary"
+                                      href={`${basePath}/${b.slug}/`}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      title="Requires preview router on this host"
+                                    >
+                                      Site path
                                     </a>
                                   </>
                                 )}
@@ -484,19 +485,20 @@ export function App() {
                     <div className="tile-actions">
                       <a
                         className="link"
-                        href={`${basePath}/${p.slug}/`}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        Open on site path
-                      </a>
-                      <a
-                        className="link secondary"
                         href={p.targetUrl}
                         target="_blank"
                         rel="noreferrer"
                       >
-                        Raw target (Railway)
+                        Open preview
+                      </a>
+                      <a
+                        className="link secondary"
+                        href={`${basePath}/${p.slug}/`}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Requires preview router on this host"
+                      >
+                        Site path (router)
                       </a>
                     </div>
                   </li>
@@ -550,19 +552,20 @@ export function App() {
                         <td className="links-cell">
                           <a
                             className="link"
-                            href={`${basePath}/${p.slug}/`}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            Site path
-                          </a>
-                          <a
-                            className="link secondary"
                             href={p.targetUrl}
                             target="_blank"
                             rel="noreferrer"
                           >
-                            Target
+                            Open preview
+                          </a>
+                          <a
+                            className="link secondary"
+                            href={`${basePath}/${p.slug}/`}
+                            target="_blank"
+                            rel="noreferrer"
+                            title="Requires preview router on this host"
+                          >
+                            Site path
                           </a>
                         </td>
                       </tr>
