@@ -5,3 +5,4 @@ dist/
 .env.local
 data/registry.json
 services/*/data/
+railway.toml
