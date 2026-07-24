@@ -1,5 +1,6 @@
 # Build from repo root: docker build -f docker/orchestrator.Dockerfile -t flotilla-preview-orchestrator .
-FROM node:22-alpine AS build
+# bookworm (glibc) so @fastify/secure-session / sodium-native prebuilds work in production.
+FROM node:22-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages ./packages
@@ -9,7 +10,7 @@ COPY config ./config
 RUN npm ci
 RUN npm run build -w @flotilla/shared -w @flotilla/dashboard -w @flotilla/orchestrator
 
-FROM node:22-alpine
+FROM node:22-bookworm-slim
 WORKDIR /app
 ENV NODE_ENV=production
 ENV DASHBOARD_DIST=/app/apps/dashboard/dist
