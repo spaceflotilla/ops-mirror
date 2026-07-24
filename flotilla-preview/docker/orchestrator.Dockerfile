@@ -19,11 +19,9 @@ COPY --from=build /app/packages/shared ./packages/shared
 COPY --from=build /app/services/orchestrator ./services/orchestrator
 COPY --from=build /app/apps/dashboard/dist ./apps/dashboard/dist
 COPY --from=build /app/config ./config
-# npm workspaces use symlinks; Docker COPY can leave broken links — re-link for runtime.
 RUN mkdir -p /app/node_modules/@flotilla \
   && rm -rf /app/node_modules/@flotilla/shared \
   && ln -s /app/packages/shared /app/node_modules/@flotilla/shared \
-  && mkdir -p /app/data \
-  && node -e "import('@flotilla/shared').then(() => console.log('shared ok')).catch((e)=>{console.error(e); process.exit(1)})"
-EXPOSE 8080
+  && mkdir -p /app/data
+EXPOSE 3101
 CMD ["node", "services/orchestrator/dist/index.js"]

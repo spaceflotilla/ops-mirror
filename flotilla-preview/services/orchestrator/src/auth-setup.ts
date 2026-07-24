@@ -1,7 +1,4 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import cookie from "@fastify/cookie";
-import secureSession from "@fastify/secure-session";
-import oauthPlugin from "@fastify/oauth2";
 
 const GOOGLE_OAUTH_AUTH = {
   authorizeHost: "https://accounts.google.com",
@@ -100,31 +97,39 @@ export function canAccessApi(
 
 const isProd = process.env.NODE_ENV === "production";
 
-/** Only for AUTH_DISABLED local dev when real secrets are not set. */
-const DEV_COOKIE_SESSION_PLACEHOLDER =
-  "local-dev-placeholder-32chars-min!!";
-
 export async function registerAuthPlugins(
   app: FastifyInstance,
   env: AuthEnv,
 ): Promise<void> {
+  // MVP / local: skip cookie + secure-session (native sodium) when auth is off.
+  if (env.authDisabled) {
+    app.log.warn("AUTH_DISABLED=1 — skipping session/OAuth plugins");
+    app.get("/auth/google", async (_request, reply) =>
+      reply
+        .code(503)
+        .type("text/plain")
+        .send("Auth is disabled (AUTH_DISABLED=1)."),
+    );
+    app.get("/auth/google/callback", async (_request, reply) =>
+      reply.code(503).send({ error: "auth disabled" }),
+    );
+    return;
+  }
+
   let cookieSecret = env.cookieSecret;
   let sessionSecret = env.sessionSecret;
   if (Buffer.byteLength(cookieSecret, "utf8") < 32) {
-    if (env.authDisabled) cookieSecret = DEV_COOKIE_SESSION_PLACEHOLDER;
-    else {
-      throw new Error(
-        "COOKIE_SECRET (or SESSION_SECRET) must be at least 32 bytes for @fastify/cookie",
-      );
-    }
+    throw new Error(
+      "COOKIE_SECRET (or SESSION_SECRET) must be at least 32 bytes for @fastify/cookie",
+    );
   }
   if (Buffer.byteLength(sessionSecret, "utf8") < 32) {
-    if (env.authDisabled) sessionSecret = DEV_COOKIE_SESSION_PLACEHOLDER;
-    else {
-      throw new Error("SESSION_SECRET must be at least 32 bytes");
-    }
+    throw new Error("SESSION_SECRET must be at least 32 bytes");
   }
   const resolved = { ...env, cookieSecret, sessionSecret };
+
+  const cookie = (await import("@fastify/cookie")).default;
+  const secureSession = (await import("@fastify/secure-session")).default;
 
   await app.register(cookie, {
     secret: resolved.cookieSecret,
@@ -164,6 +169,7 @@ export async function registerAuthPlugins(
     return;
   }
 
+  const oauthPlugin = (await import("@fastify/oauth2")).default;
   const callbackUri = `${resolved.publicBaseUrl}/auth/google/callback`;
 
   await app.register(oauthPlugin, {
