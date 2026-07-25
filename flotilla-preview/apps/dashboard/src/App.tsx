@@ -59,6 +59,29 @@ function matchesFlagFilter(p: PreviewEntry, filter: FlagFilter): boolean {
   return p.flag === filter;
 }
 
+function previewActivityDate(p: PreviewEntry): Date {
+  return new Date(p.lastDeployAt ?? p.updatedAt);
+}
+
+function matchesDateRange(
+  p: PreviewEntry,
+  dateFrom: string,
+  dateTo: string,
+): boolean {
+  if (!dateFrom && !dateTo) return true;
+  const t = previewActivityDate(p).getTime();
+  if (!Number.isFinite(t)) return false;
+  if (dateFrom) {
+    const start = new Date(`${dateFrom}T00:00:00`).getTime();
+    if (t < start) return false;
+  }
+  if (dateTo) {
+    const end = new Date(`${dateTo}T23:59:59.999`).getTime();
+    if (t > end) return false;
+  }
+  return true;
+}
+
 function projectShortName(projectPath: string): string {
   const parts = projectPath.split("/").filter(Boolean);
   return parts[parts.length - 1] || projectPath;
@@ -241,6 +264,10 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<ViewMode>("tiles");
   const [flagFilter, setFlagFilter] = useState<FlagFilter>("all");
+  const [projectFilter, setProjectFilter] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [sortKey, setSortKey] = useState<PreviewSortKey>("updatedAt");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [userEmail, setUserEmail] = useState<string | null | undefined>(
@@ -386,9 +413,27 @@ export function App() {
     }
   };
 
+  const projectOptions = useMemo(() => {
+    const paths = new Set(items.map((p) => p.projectPath));
+    return [...paths].sort((a, b) => a.localeCompare(b));
+  }, [items]);
+
+  const filtersActive =
+    flagFilter !== "all" ||
+    projectFilter !== "all" ||
+    Boolean(dateFrom) ||
+    Boolean(dateTo);
+
   const filteredItems = useMemo(
-    () => items.filter((p) => matchesFlagFilter(p, flagFilter)),
-    [items, flagFilter],
+    () =>
+      items.filter((p) => {
+        if (!matchesFlagFilter(p, flagFilter)) return false;
+        if (projectFilter !== "all" && p.projectPath !== projectFilter)
+          return false;
+        if (!matchesDateRange(p, dateFrom, dateTo)) return false;
+        return true;
+      }),
+    [items, flagFilter, projectFilter, dateFrom, dateTo],
   );
 
   const sortedItems = useMemo(
@@ -402,8 +447,34 @@ export function App() {
   const sortLabel = (key: PreviewSortKey) =>
     sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : "";
 
-  const filterLabel =
+  const flagFilterLabel =
     FLAG_FILTERS.find((f) => f.value === flagFilter)?.label ?? flagFilter;
+
+  const clearFilters = () => {
+    setFlagFilter("all");
+    setProjectFilter("all");
+    setDateFrom("");
+    setDateTo("");
+  };
+
+  const filterSummaryParts: string[] = [];
+  if (projectFilter !== "all")
+    filterSummaryParts.push(projectShortName(projectFilter));
+  if (flagFilter !== "all") filterSummaryParts.push(flagFilterLabel);
+  if (dateFrom || dateTo) {
+    filterSummaryParts.push(
+      `${dateFrom || "…"} → ${dateTo || "…"}`,
+    );
+  }
+  const filterSummary =
+    filterSummaryParts.length > 0
+      ? filterSummaryParts.join(" · ")
+      : "All previews";
+
+  const activeFilterCount =
+    (flagFilter !== "all" ? 1 : 0) +
+    (projectFilter !== "all" ? 1 : 0) +
+    (dateFrom || dateTo ? 1 : 0);
 
   const signIn = (loginPath: string) => {
     const returnTo =
@@ -534,23 +605,103 @@ export function App() {
         </div>
 
         {mainTab === "previews" && (
-          <div
-            className="flag-filters"
-            role="group"
-            aria-label="Filter by flag"
-          >
-            <span className="flag-filters-label">Flag</span>
-            {FLAG_FILTERS.map((f) => (
+          <div className="filters-shell">
+            <div className="filters-toggle-row">
               <button
-                key={f.value}
                 type="button"
-                className={`flag-chip${flagFilter === f.value ? " active" : ""}${f.value !== "all" && f.value !== "unflagged" ? ` chip-${f.value}` : ""}`}
-                aria-pressed={flagFilter === f.value}
-                onClick={() => setFlagFilter(f.value)}
+                className={`filters-toggle${filtersOpen ? " open" : ""}${filtersActive ? " has-active" : ""}`}
+                aria-expanded={filtersOpen}
+                onClick={() => setFiltersOpen((o) => !o)}
               >
-                {f.label}
+                <span className="filters-toggle-label">Filters</span>
+                <span className="filters-toggle-summary">{filterSummary}</span>
+                {activeFilterCount > 0 && (
+                  <span className="filters-count" aria-hidden>
+                    {activeFilterCount}
+                  </span>
+                )}
+                <span className="filters-chevron" aria-hidden>
+                  {filtersOpen ? "▴" : "▾"}
+                </span>
               </button>
-            ))}
+              {filtersActive && (
+                <button
+                  type="button"
+                  className="btn-tool filters-clear"
+                  onClick={clearFilters}
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+
+            {filtersOpen && (
+              <div className="filters-panel">
+                <div className="filter-row">
+                  <label className="filter-field">
+                    <span className="flag-filters-label">Project</span>
+                    <select
+                      className="filter-select"
+                      value={projectFilter}
+                      onChange={(e) => setProjectFilter(e.target.value)}
+                      aria-label="Filter by project"
+                    >
+                      <option value="all">All projects</option>
+                      {projectOptions.map((path) => (
+                        <option key={path} value={path}>
+                          {projectShortName(path)}
+                          {path.includes("/") ? ` (${path})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="filter-field">
+                    <span className="flag-filters-label">From</span>
+                    <input
+                      type="date"
+                      className="filter-date"
+                      value={dateFrom}
+                      max={dateTo || undefined}
+                      onChange={(e) => setDateFrom(e.target.value)}
+                      aria-label="Activity from date"
+                    />
+                  </label>
+                  <label className="filter-field">
+                    <span className="flag-filters-label">To</span>
+                    <input
+                      type="date"
+                      className="filter-date"
+                      value={dateTo}
+                      min={dateFrom || undefined}
+                      onChange={(e) => setDateTo(e.target.value)}
+                      aria-label="Activity to date"
+                    />
+                  </label>
+                </div>
+                <div
+                  className="flag-filters"
+                  role="group"
+                  aria-label="Filter by flag"
+                >
+                  <span className="flag-filters-label">Flag</span>
+                  {FLAG_FILTERS.map((f) => (
+                    <button
+                      key={f.value}
+                      type="button"
+                      className={`flag-chip${flagFilter === f.value ? " active" : ""}${f.value !== "all" && f.value !== "unflagged" ? ` chip-${f.value}` : ""}`}
+                      aria-pressed={flagFilter === f.value}
+                      onClick={() => setFlagFilter(f.value)}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="filters-hint muted">
+                  Date range uses last deploy time (or last update). Collapsed
+                  filters stay out of the way until you need them.
+                </p>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -778,20 +929,20 @@ export function App() {
 
           {hasNoMatches && (
             <EmptyState
-              title={`No ${filterLabel.toLowerCase()} previews`}
+              title="No matching previews"
               action={
                 <button
                   type="button"
                   className="btn-tool"
-                  onClick={() => setFlagFilter("all")}
+                  onClick={clearFilters}
                 >
-                  Clear flag filter
+                  Clear filters
                 </button>
               }
             >
-              Nothing matches the <strong>{filterLabel}</strong> filter
-              {archived ? " among archived previews" : ""}. Try another flag or
-              clear the filter.
+              Nothing matches <strong>{filterSummary}</strong>
+              {archived ? " among archived previews" : ""}. Adjust project, flag,
+              or date range — or clear filters.
             </EmptyState>
           )}
 
