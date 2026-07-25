@@ -42,6 +42,57 @@ export function invalidateSiteCatalogCache(): void {
   cache = null;
 }
 
+/** Branches known from webhook/publish registry when live GitLab listing is unavailable. */
+async function catalogFromRegistry(
+  store: RegistryStore,
+  paths: string[],
+  gitlabBaseUrl: string,
+  opts: {
+    gitlabConfigured: boolean;
+    message: string;
+  },
+): Promise<SiteCatalogResponse> {
+  const all = await store.list();
+  const projects: SiteProjectCatalog[] = [];
+
+  for (const path of paths) {
+    const matching = all.filter((p) => p.projectPath === path);
+    const webUrl = `${gitlabBaseUrl}/${path}`;
+    const rows: SiteBranchRow[] = matching.map((entry) => ({
+      name: entry.branch,
+      slug: entry.slug,
+      commitSha: entry.commitSha,
+      commitTitle: entry.commitTitle ?? entry.description,
+      previewCapable: true,
+      inRegistry: true,
+      preview: entry,
+      gitlabBranchUrl: `${webUrl}/-/tree/${encodeURIComponent(entry.branch)}`,
+    }));
+    rows.sort((a, b) => {
+      const ta = a.preview?.updatedAt
+        ? new Date(a.preview.updatedAt).getTime()
+        : 0;
+      const tb = b.preview?.updatedAt
+        ? new Date(b.preview.updatedAt).getTime()
+        : 0;
+      return tb - ta || a.name.localeCompare(b.name);
+    });
+    projects.push({
+      path,
+      webUrl,
+      branches: rows,
+    });
+  }
+
+  return {
+    gitlabConfigured: opts.gitlabConfigured,
+    gitlabBaseUrl,
+    refreshedAt: new Date().toISOString(),
+    projects,
+    message: opts.message,
+  };
+}
+
 export async function getSiteCatalog(
   store: RegistryStore,
   forceRefresh: boolean,
@@ -70,36 +121,22 @@ export async function getSiteCatalog(
   }
 
   if (!isGitLabConfigured()) {
-    const data: SiteCatalogResponse = {
+    const data = await catalogFromRegistry(store, paths, gitlabBaseUrl, {
       gitlabConfigured: false,
-      gitlabBaseUrl,
-      refreshedAt: new Date().toISOString(),
-      projects: paths.map((path) => ({
-        path,
-        branches: [],
-        error:
-          "GitLab token not configured — set GITLAB_ACCESS_TOKEN on the orchestrator.",
-      })),
       message:
-        "Set GITLAB_ACCESS_TOKEN (read_api) to load branches from GitLab. Site project paths still come from config/site-projects.json or GITLAB_SITE_PROJECTS.",
-    };
+        "Showing branches from the preview registry only — set GITLAB_ACCESS_TOKEN (read_api) for the full GitLab branch list.",
+    });
     cache = { expires: now + TTL_MS, data };
     return data;
   }
 
-  // Railway (public cloud) cannot resolve VPN-only / private DNS for GitLab.
+  // Prefer registry when catalog is explicitly disabled (e.g. private GitLab DNS).
   if (process.env.GITLAB_CATALOG_DISABLED === "1") {
-    const data: SiteCatalogResponse = {
+    const data = await catalogFromRegistry(store, paths, gitlabBaseUrl, {
       gitlabConfigured: true,
-      gitlabBaseUrl,
-      refreshedAt: new Date().toISOString(),
-      projects: paths.map((path) => ({
-        path,
-        branches: [],
-      })),
       message:
-        "Site branch listing is disabled (GITLAB_CATALOG_DISABLED=1). Use the Previews tab — entries appear when GitLab webhooks fire. GitLab → Railway webhooks still work without public DNS.",
-    };
+        "Live GitLab branch listing is disabled (GITLAB_CATALOG_DISABLED=1). Showing webhook-registered preview branches. Unset that variable when Railway can reach GitLab.",
+    });
     cache = { expires: now + TTL_MS, data };
     return data;
   }
@@ -152,11 +189,9 @@ export async function getSiteCatalog(
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (/ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(msg)) {
-        dnsFailure =
-          "GitLab hostname is not reachable from Railway (private/VPN DNS). Webhooks still work. Use the Previews tab for live entries, or expose GitLab via tunnel/public DNS for this catalog.";
-        projects.push({ path, branches: [], error: dnsFailure });
-        continue;
+      if (/ENOTFOUND|EAI_AGAIN|getaddrinfo|unreachable|ECONNREFUSED|ETIMEDOUT/i.test(msg)) {
+        dnsFailure = msg;
+        break;
       }
       projects.push({
         path,
@@ -166,14 +201,21 @@ export async function getSiteCatalog(
     }
   }
 
+  if (dnsFailure) {
+    const data = await catalogFromRegistry(store, paths, gitlabBaseUrl, {
+      gitlabConfigured: true,
+      message:
+        "GitLab is not reachable from Railway — showing webhook-registered preview branches. Fix DNS/TLS or set GITLAB_TLS_INSECURE=1 for a self-signed cert.",
+    });
+    cache = { expires: now + TTL_MS, data };
+    return data;
+  }
+
   const data: SiteCatalogResponse = {
     gitlabConfigured: true,
     gitlabBaseUrl,
     refreshedAt: new Date().toISOString(),
     projects,
-    message: dnsFailure
-      ? "Site branches need public DNS to gitlab.flotilla.space from Railway. Switch to Previews for webhook-registered environments."
-      : undefined,
   };
   cache = { expires: now + TTL_MS, data };
   return data;
