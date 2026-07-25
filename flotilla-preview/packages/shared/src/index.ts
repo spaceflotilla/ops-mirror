@@ -60,8 +60,13 @@ export const PreviewEntrySchema = z.object({
   targetUrl: z.string().url(),
   status: PreviewStatusSchema,
   archived: z.boolean(),
-  /** Curated branch role — set by humans in the dashboard */
+  /** Curated branch role — auto Latest or set by humans in the dashboard */
   flag: PreviewFlagSchema.optional(),
+  /**
+   * When true, `flag` was set by a human and must not be overwritten by
+   * auto-Latest reconciliation (except clearing auto Latest from siblings).
+   */
+  flagManual: z.boolean().optional(),
   /** ISO timestamps */
   createdAt: z.string(),
   updatedAt: z.string(),

@@ -26,6 +26,7 @@ type PreviewEntry = {
   status: string;
   archived: boolean;
   flag?: PreviewFlag;
+  flagManual?: boolean;
   createdAt: string;
   updatedAt: string;
   lastDeployAt?: string;
@@ -66,23 +67,31 @@ function projectShortName(projectPath: string): string {
 function FlagSelect({
   slug,
   flag,
+  flagManual,
   onChange,
 }: {
   slug: string;
   flag?: PreviewFlag;
+  flagManual?: boolean;
   onChange: (slug: string, flag: PreviewFlag | null) => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const autoLatest = flag === "latest" && !flagManual;
+  const title = autoLatest
+    ? "Auto Latest — newest deploy for this project. Change to override (e.g. Broken)."
+    : flagManual
+      ? "Manually set — auto Latest will skip this tile until you clear the flag."
+      : "Mark this preview’s role among branches of the same project";
 
   return (
     <span className="flag-wrap">
       <select
-        className={`flag-select${flag ? ` flag-${flag}` : " flag-unset"}`}
+        className={`flag-select${flag ? ` flag-${flag}` : " flag-unset"}${autoLatest ? " flag-auto" : ""}`}
         value={flag ?? ""}
         disabled={busy}
         aria-label={`Flag for ${slug}`}
-        title="Mark this preview’s role among branches of the same project"
+        title={title}
         onClick={(e) => e.stopPropagation()}
         onChange={(e) => {
           const v = e.target.value;
@@ -99,7 +108,9 @@ function FlagSelect({
         <option value="">Set flag…</option>
         {PREVIEW_FLAGS.map((f) => (
           <option key={f.value} value={f.value}>
-            {f.label}
+            {f.value === "latest" && autoLatest
+              ? "Latest (auto)"
+              : f.label}
           </option>
         ))}
       </select>
@@ -441,10 +452,10 @@ export function App() {
         <p className="sub">
           Branch names must end with{" "}
           <code>project-color-animal</code> (example:{" "}
-          <code>orbit-green-apple</code>). Flag each tile as{" "}
-          <strong>Latest</strong>, <strong>Production</strong>, prototype,
-          deprecated, or broken so branches of the same project are easy to tell
-          apart. Deploy state (building / failed) still shows when not ready.
+          <code>orbit-green-apple</code>). <strong>Latest</strong> is assigned
+          automatically to the newest deploy per project (one only); override any
+          flag manually (e.g. mark a bad build <strong>Broken</strong>). Use
+          Production / prototype / deprecated the same way.
         </p>
       </header>
 
@@ -827,6 +838,7 @@ export function App() {
                             <FlagSelect
                               slug={p.slug}
                               flag={p.flag}
+                              flagManual={p.flagManual}
                               onChange={setPreviewFlag}
                             />
                             {p.status !== "ready" && (
@@ -944,6 +956,7 @@ export function App() {
                             <FlagSelect
                               slug={p.slug}
                               flag={p.flag}
+                              flagManual={p.flagManual}
                               onChange={setPreviewFlag}
                             />
                             {p.status !== "ready" && (

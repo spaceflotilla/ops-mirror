@@ -794,6 +794,10 @@ code {
   border-color: rgba(3, 206, 164, 0.45);
 }
 
+.flag-select.flag-auto {
+  box-shadow: inset 0 0 0 1px rgba(3, 206, 164, 0.35);
+}
+
 .flag-select.flag-production,
 .pill.flag-production {
   background: rgba(127, 126, 255, 0.22);
