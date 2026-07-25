@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 
 type PreviewFlag =
   | "latest"
@@ -6,6 +12,8 @@ type PreviewFlag =
   | "prototype"
   | "deprecated"
   | "broken";
+
+type FlagFilter = "all" | PreviewFlag | "unflagged";
 
 type PreviewEntry = {
   slug: string;
@@ -33,9 +41,26 @@ const PREVIEW_FLAGS: { value: PreviewFlag; label: string }[] = [
   { value: "broken", label: "Broken" },
 ];
 
+const FLAG_FILTERS: { value: FlagFilter; label: string }[] = [
+  { value: "all", label: "All" },
+  ...PREVIEW_FLAGS,
+  { value: "unflagged", label: "Unflagged" },
+];
+
 function flagLabel(flag: PreviewFlag | undefined): string {
   if (!flag) return "";
   return PREVIEW_FLAGS.find((f) => f.value === flag)?.label ?? flag;
+}
+
+function matchesFlagFilter(p: PreviewEntry, filter: FlagFilter): boolean {
+  if (filter === "all") return true;
+  if (filter === "unflagged") return !p.flag;
+  return p.flag === filter;
+}
+
+function projectShortName(projectPath: string): string {
+  const parts = projectPath.split("/").filter(Boolean);
+  return parts[parts.length - 1] || projectPath;
 }
 
 function FlagSelect({
@@ -170,6 +195,33 @@ type SiteCatalogResponse = {
   message?: string;
 };
 
+function EmptyState({
+  title,
+  children,
+  action,
+}: {
+  title: string;
+  children: ReactNode;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="empty-state" role="status">
+      <p className="empty-title">{title}</p>
+      <p className="empty-body">{children}</p>
+      {action}
+    </div>
+  );
+}
+
+function LoadingBlock({ label }: { label: string }) {
+  return (
+    <div className="loading-block" role="status" aria-live="polite">
+      <span className="loading-dot" aria-hidden />
+      <span className="muted">{label}</span>
+    </div>
+  );
+}
+
 export function App() {
   const [mainTab, setMainTab] = useState<MainTab>("previews");
   const [archived, setArchived] = useState(false);
@@ -177,6 +229,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<ViewMode>("tiles");
+  const [flagFilter, setFlagFilter] = useState<FlagFilter>("all");
   const [sortKey, setSortKey] = useState<PreviewSortKey>("updatedAt");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [userEmail, setUserEmail] = useState<string | null | undefined>(
@@ -322,12 +375,24 @@ export function App() {
     }
   };
 
-  const sortedItems = [...items].sort((a, b) =>
-    comparePreviews(a, b, sortKey, sortDir),
+  const filteredItems = useMemo(
+    () => items.filter((p) => matchesFlagFilter(p, flagFilter)),
+    [items, flagFilter],
+  );
+
+  const sortedItems = useMemo(
+    () =>
+      [...filteredItems].sort((a, b) =>
+        comparePreviews(a, b, sortKey, sortDir),
+      ),
+    [filteredItems, sortKey, sortDir],
   );
 
   const sortLabel = (key: PreviewSortKey) =>
     sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : "";
+
+  const filterLabel =
+    FLAG_FILTERS.find((f) => f.value === flagFilter)?.label ?? flagFilter;
 
   const signIn = (loginPath: string) => {
     const returnTo =
@@ -351,6 +416,21 @@ export function App() {
     Boolean(error?.startsWith("SIGN_IN_REQUIRED:")) ||
     Boolean(catalogError?.startsWith("SIGN_IN_REQUIRED:"));
 
+  const showPreviewContent =
+    !loading && !(error?.startsWith("SIGN_IN_REQUIRED:"));
+
+  const hasNoMatches =
+    showPreviewContent &&
+    !error &&
+    items.length > 0 &&
+    filteredItems.length === 0;
+
+  const hasNoPreviews =
+    showPreviewContent &&
+    !error &&
+    items.length === 0 &&
+    !previewBlocked;
+
   return (
     <div className="page">
       <header className="header">
@@ -366,7 +446,9 @@ export function App() {
           deprecated, or broken so branches of the same project are easy to tell
           apart. Deploy state (building / failed) still shows when not ready.
         </p>
+      </header>
 
+      <div className="controls-bar">
         <nav className="main-tabs" aria-label="Primary">
           <button
             type="button"
@@ -391,6 +473,7 @@ export function App() {
                 type="button"
                 className={view === "tiles" ? "active" : ""}
                 onClick={() => setView("tiles")}
+                aria-pressed={view === "tiles"}
               >
                 Tiles
               </button>
@@ -398,6 +481,7 @@ export function App() {
                 type="button"
                 className={view === "list" ? "active" : ""}
                 onClick={() => setView("list")}
+                aria-pressed={view === "list"}
               >
                 List
               </button>
@@ -414,11 +498,15 @@ export function App() {
             </label>
           )}
           {mainTab === "previews" ? (
-            <button type="button" onClick={() => void load()}>
+            <button type="button" className="btn-tool" onClick={() => void load()}>
               Refresh
             </button>
           ) : (
-            <button type="button" onClick={() => void loadCatalog(true)}>
+            <button
+              type="button"
+              className="btn-tool"
+              onClick={() => void loadCatalog(true)}
+            >
               Refresh from GitLab
             </button>
           )}
@@ -433,7 +521,28 @@ export function App() {
             </>
           )}
         </div>
-      </header>
+
+        {mainTab === "previews" && (
+          <div
+            className="flag-filters"
+            role="group"
+            aria-label="Filter by flag"
+          >
+            <span className="flag-filters-label">Flag</span>
+            {FLAG_FILTERS.map((f) => (
+              <button
+                key={f.value}
+                type="button"
+                className={`flag-chip${flagFilter === f.value ? " active" : ""}${f.value !== "all" && f.value !== "unflagged" ? ` chip-${f.value}` : ""}`}
+                aria-pressed={flagFilter === f.value}
+                onClick={() => setFlagFilter(f.value)}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       {needsSignIn && (
         <div className="banner signin">
@@ -459,8 +568,14 @@ export function App() {
               <strong>Site catalog failed.</strong> {catalogError}
             </div>
           )}
-          {catalogLoading && <p className="muted">Loading GitLab branches…</p>}
-          {!catalogLoading && catalog && (
+          {catalogLoading && <LoadingBlock label="Loading GitLab branches…" />}
+          {!catalogLoading && catalog && catalog.projects.length === 0 && (
+            <EmptyState title="No site projects">
+              Catalog is empty. Check orchestrator site-projects config or GitLab
+              token.
+            </EmptyState>
+          )}
+          {!catalogLoading && catalog && catalog.projects.length > 0 && (
             <div className="site-catalog">
               <p className="catalog-meta muted">
                 GitLab:{" "}
@@ -510,7 +625,7 @@ export function App() {
                     <p className="project-error">{proj.error}</p>
                   )}
                   {!proj.error && proj.branches.length === 0 && (
-                    <p className="muted">No branches returned.</p>
+                    <p className="muted nested-empty">No branches returned.</p>
                   )}
                   {!proj.error && proj.branches.length > 0 && (
                     <div className="table-wrap nested">
@@ -520,7 +635,7 @@ export function App() {
                             <th>Branch</th>
                             <th>Preview slug</th>
                             <th>Commit</th>
-                            <th>Registry</th>
+                            <th>Flag</th>
                             <th>Links</th>
                           </tr>
                         </thead>
@@ -570,9 +685,12 @@ export function App() {
                                       >
                                         {flagLabel(b.preview.flag)}
                                       </span>
-                                    ) : null}
-                                    {(b.preview.status !== "ready" ||
-                                      !b.preview.flag) && (
+                                    ) : (
+                                      <span className="pill flag-unset-pill">
+                                        unflagged
+                                      </span>
+                                    )}
+                                    {b.preview.status !== "ready" && (
                                       <span
                                         className={`pill status-${b.preview.status}`}
                                       >
@@ -628,26 +746,49 @@ export function App() {
                 <code>npm run build</code> so <code>/api</code> shares your
                 session cookie.
               </div>
+              <button
+                type="button"
+                className="btn-tool retry"
+                onClick={() => void load()}
+              >
+                Retry
+              </button>
             </div>
           )}
 
-          {loading && <p className="muted">Loading…</p>}
+          {loading && <LoadingBlock label="Loading previews…" />}
 
-          {!loading &&
-            !error &&
-            items.length === 0 &&
-            !previewBlocked && (
-              <p className="muted">
-                No previews yet. Push a matching branch to GitLab (webhook) or
-                check <strong>Site branches</strong> for branch names.
-              </p>
-            )}
+          {hasNoPreviews && (
+            <EmptyState title="No previews yet">
+              Push a matching branch to GitLab (webhook) or check{" "}
+              <strong>Site branches</strong> for branch names.
+            </EmptyState>
+          )}
 
-          {!loading &&
-            !(error?.startsWith("SIGN_IN_REQUIRED:")) &&
+          {hasNoMatches && (
+            <EmptyState
+              title={`No ${filterLabel.toLowerCase()} previews`}
+              action={
+                <button
+                  type="button"
+                  className="btn-tool"
+                  onClick={() => setFlagFilter("all")}
+                >
+                  Clear flag filter
+                </button>
+              }
+            >
+              Nothing matches the <strong>{filterLabel}</strong> filter
+              {archived ? " among archived previews" : ""}. Try another flag or
+              clear the filter.
+            </EmptyState>
+          )}
+
+          {showPreviewContent &&
+            filteredItems.length > 0 &&
             view === "tiles" && (
               <ul className="tiles">
-                {items.map((p) => {
+                {sortedItems.map((p) => {
                   const desc =
                     p.description?.trim() ||
                     p.commitTitle?.trim() ||
@@ -678,27 +819,38 @@ export function App() {
                         />
                       </a>
                       <div className="tile-body">
-                        <div className="tile-title">{p.slug}</div>
-                        {desc && (
-                          <p className="tile-desc">{desc}</p>
-                        )}
-                        <div className="tile-meta">{p.projectPath}</div>
-                        <div className="tile-meta status-row">
-                          <FlagSelect
-                            slug={p.slug}
-                            flag={p.flag}
-                            onChange={setPreviewFlag}
-                          />
-                          {p.status !== "ready" && (
-                            <span className={`pill status-${p.status}`}>
-                              {p.status}
-                            </span>
-                          )}
-                          {p.archived && (
-                            <span className="pill archived">archived</span>
-                          )}
+                        <div className="tile-head">
+                          <div className="tile-title" title={p.slug}>
+                            {p.slug}
+                          </div>
+                          <div className="tile-flag-row">
+                            <FlagSelect
+                              slug={p.slug}
+                              flag={p.flag}
+                              onChange={setPreviewFlag}
+                            />
+                            {p.status !== "ready" && (
+                              <span className={`pill status-${p.status}`}>
+                                {p.status}
+                              </span>
+                            )}
+                            {p.archived && (
+                              <span className="pill archived">archived</span>
+                            )}
+                          </div>
                         </div>
-                        <div className="tile-meta branch">{p.branch}</div>
+                        {desc && <p className="tile-desc">{desc}</p>}
+                        <div className="tile-meta-row">
+                          <span
+                            className="tile-project"
+                            title={p.projectPath}
+                          >
+                            {projectShortName(p.projectPath)}
+                          </span>
+                          <span className="tile-meta branch" title={p.branch}>
+                            {p.branch}
+                          </span>
+                        </div>
                         {p.lastDeployAt && (
                           <div className="tile-meta subtle">
                             Deployed {new Date(p.lastDeployAt).toLocaleString()}
@@ -721,11 +873,11 @@ export function App() {
               </ul>
             )}
 
-          {!loading &&
-            !(error?.startsWith("SIGN_IN_REQUIRED:")) &&
+          {showPreviewContent &&
+            filteredItems.length > 0 &&
             view === "list" && (
               <div className="table-wrap">
-                <table className="data-table">
+                <table className="data-table dense">
                   <thead>
                     <tr>
                       {(
@@ -738,13 +890,20 @@ export function App() {
                           ["updatedAt", "Updated"],
                         ] as const
                       ).map(([key, label]) => (
-                        <th key={key} aria-sort={sortKey === key ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
+                        <th
+                          key={key}
+                          aria-sort={
+                            sortKey === key
+                              ? sortDir === "asc"
+                                ? "ascending"
+                                : "descending"
+                              : "none"
+                          }
+                        >
                           <button
                             type="button"
                             className={
-                              sortKey === key
-                                ? "th-sort active"
-                                : "th-sort"
+                              sortKey === key ? "th-sort active" : "th-sort"
                             }
                             onClick={() => toggleSort(key)}
                           >
@@ -761,9 +920,25 @@ export function App() {
                   <tbody>
                     {sortedItems.map((p) => (
                       <tr key={p.slug}>
-                        <td className="mono">{p.slug}</td>
-                        <td>{p.projectPath}</td>
-                        <td className="mono subtle">{p.branch}</td>
+                        <td className="mono slug-cell" title={p.slug}>
+                          {p.slug}
+                        </td>
+                        <td
+                          className="project-cell"
+                          title={p.projectPath}
+                        >
+                          <span className="project-short">
+                            {projectShortName(p.projectPath)}
+                          </span>
+                          {p.projectPath.includes("/") && (
+                            <span className="project-path subtle">
+                              {p.projectPath}
+                            </span>
+                          )}
+                        </td>
+                        <td className="mono subtle branch-cell" title={p.branch}>
+                          {p.branch}
+                        </td>
                         <td>
                           <div className="status-row">
                             <FlagSelect
@@ -801,7 +976,7 @@ export function App() {
                             target="_blank"
                             rel="noreferrer"
                           >
-                            Open preview
+                            Open
                           </a>
                         </td>
                       </tr>
