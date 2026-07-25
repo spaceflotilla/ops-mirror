@@ -47,11 +47,33 @@ export class RegistryStore {
     await this.enqueue(async () => {
       const data = await this.load();
       const prev = data.previews[entry.slug];
+      // Merge onto prev so omitted user fields (e.g. flag) survive webhook/publish.
       const merged: PreviewEntry = prev
-        ? { ...entry, createdAt: prev.createdAt }
+        ? { ...prev, ...entry, createdAt: prev.createdAt }
         : entry;
       data.previews[entry.slug] = PreviewEntrySchema.parse(merged);
       await this.save(data);
+    });
+  }
+
+  /** Set or clear the curated branch flag (null clears). */
+  async setFlag(
+    slug: string,
+    flag: PreviewEntry["flag"] | null,
+  ): Promise<PreviewEntry | undefined> {
+    return this.enqueue(async () => {
+      const data = await this.load();
+      const cur = data.previews[slug];
+      if (!cur) return undefined;
+      const next: PreviewEntry = { ...cur, updatedAt: new Date().toISOString() };
+      if (flag == null) {
+        delete (next as { flag?: PreviewEntry["flag"] }).flag;
+      } else {
+        next.flag = flag;
+      }
+      data.previews[slug] = PreviewEntrySchema.parse(next);
+      await this.save(data);
+      return data.previews[slug];
     });
   }
 

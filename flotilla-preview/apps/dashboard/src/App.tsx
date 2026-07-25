@@ -1,22 +1,147 @@
 import { useCallback, useEffect, useState } from "react";
 
+type PreviewFlag =
+  | "latest"
+  | "production"
+  | "prototype"
+  | "deprecated"
+  | "broken";
+
 type PreviewEntry = {
   slug: string;
   projectPath: string;
   branch: string;
   commitSha?: string;
   commitTitle?: string;
+  description?: string;
   targetUrl: string;
   status: string;
   archived: boolean;
+  flag?: PreviewFlag;
   createdAt: string;
   updatedAt: string;
   lastDeployAt?: string;
   lastError?: string;
+  screenshotAt?: string;
 };
+
+const PREVIEW_FLAGS: { value: PreviewFlag; label: string }[] = [
+  { value: "latest", label: "Latest" },
+  { value: "production", label: "Production" },
+  { value: "prototype", label: "Prototype" },
+  { value: "deprecated", label: "Deprecated" },
+  { value: "broken", label: "Broken" },
+];
+
+function flagLabel(flag: PreviewFlag | undefined): string {
+  if (!flag) return "";
+  return PREVIEW_FLAGS.find((f) => f.value === flag)?.label ?? flag;
+}
+
+function FlagSelect({
+  slug,
+  flag,
+  onChange,
+}: {
+  slug: string;
+  flag?: PreviewFlag;
+  onChange: (slug: string, flag: PreviewFlag | null) => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  return (
+    <span className="flag-wrap">
+      <select
+        className={`flag-select${flag ? ` flag-${flag}` : " flag-unset"}`}
+        value={flag ?? ""}
+        disabled={busy}
+        aria-label={`Flag for ${slug}`}
+        title="Mark this preview’s role among branches of the same project"
+        onClick={(e) => e.stopPropagation()}
+        onChange={(e) => {
+          const v = e.target.value;
+          const next = (v || null) as PreviewFlag | null;
+          setBusy(true);
+          setErr(null);
+          void onChange(slug, next)
+            .catch((ex) => {
+              setErr(ex instanceof Error ? ex.message : String(ex));
+            })
+            .finally(() => setBusy(false));
+        }}
+      >
+        <option value="">Set flag…</option>
+        {PREVIEW_FLAGS.map((f) => (
+          <option key={f.value} value={f.value}>
+            {f.label}
+          </option>
+        ))}
+      </select>
+      {err && (
+        <span className="flag-err" title={err}>
+          !
+        </span>
+      )}
+    </span>
+  );
+}
 
 type ViewMode = "tiles" | "list";
 type MainTab = "previews" | "sites";
+
+type PreviewSortKey =
+  | "slug"
+  | "projectPath"
+  | "branch"
+  | "status"
+  | "commit"
+  | "updatedAt";
+
+type SortDir = "asc" | "desc";
+
+function comparePreviews(
+  a: PreviewEntry,
+  b: PreviewEntry,
+  key: PreviewSortKey,
+  dir: SortDir,
+): number {
+  const mul = dir === "asc" ? 1 : -1;
+  const str = (x: string | undefined) => (x ?? "").toLowerCase();
+  let cmp = 0;
+  switch (key) {
+    case "slug":
+      cmp = str(a.slug).localeCompare(str(b.slug));
+      break;
+    case "projectPath":
+      cmp = str(a.projectPath).localeCompare(str(b.projectPath));
+      break;
+    case "branch":
+      cmp = str(a.branch).localeCompare(str(b.branch));
+      break;
+    case "status": {
+      // Prefer user flag for sorting; fall back to deploy status.
+      const fa = str(a.flag || a.status);
+      const fb = str(b.flag || b.status);
+      cmp = fa.localeCompare(fb);
+      break;
+    }
+    case "commit":
+      cmp = str(a.commitTitle || a.commitSha).localeCompare(
+        str(b.commitTitle || b.commitSha),
+      );
+      break;
+    case "updatedAt": {
+      const ta = new Date(a.updatedAt).getTime() || 0;
+      const tb = new Date(b.updatedAt).getTime() || 0;
+      cmp = ta - tb;
+      break;
+    }
+    default:
+      cmp = 0;
+  }
+  return cmp * mul;
+}
 
 type SiteBranchRow = {
   name: string;
@@ -46,15 +171,18 @@ type SiteCatalogResponse = {
 };
 
 export function App() {
-  const [mainTab, setMainTab] = useState<MainTab>("sites");
+  const [mainTab, setMainTab] = useState<MainTab>("previews");
   const [archived, setArchived] = useState(false);
   const [items, setItems] = useState<PreviewEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<ViewMode>("tiles");
+  const [sortKey, setSortKey] = useState<PreviewSortKey>("updatedAt");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [userEmail, setUserEmail] = useState<string | null | undefined>(
     undefined,
   );
+  const [routerPublicUrl, setRouterPublicUrl] = useState<string | null>(null);
 
   const [catalog, setCatalog] = useState<SiteCatalogResponse | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(false);
@@ -75,6 +203,21 @@ export function App() {
       else setUserEmail(data.email ?? null);
     } catch {
       setUserEmail(null);
+    }
+  }, []);
+
+  const loadConfig = useCallback(async () => {
+    try {
+      const res = await fetch("/api/config");
+      if (!res.ok) return;
+      const data = (await res.json()) as { routerPublicUrl?: string | null };
+      setRouterPublicUrl(
+        typeof data.routerPublicUrl === "string" && data.routerPublicUrl
+          ? data.routerPublicUrl.replace(/\/$/, "")
+          : null,
+      );
+    } catch {
+      /* ignore */
     }
   }, []);
 
@@ -136,7 +279,8 @@ export function App() {
 
   useEffect(() => {
     void loadMe();
-  }, [loadMe]);
+    void loadConfig();
+  }, [loadMe, loadConfig]);
 
   useEffect(() => {
     void load();
@@ -146,7 +290,44 @@ export function App() {
     if (mainTab === "sites") void loadCatalog(false);
   }, [mainTab, loadCatalog]);
 
-  const basePath = "";
+  /** Prefer gated router URL; fall back to raw deploy URL if router not configured. */
+  const previewHref = (slug: string, targetUrl: string) =>
+    routerPublicUrl ? `${routerPublicUrl}/${slug}/` : targetUrl;
+
+  const setPreviewFlag = useCallback(
+    async (slug: string, flag: PreviewFlag | null) => {
+      const res = await fetch(`/api/previews/${encodeURIComponent(slug)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ flag }),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `Failed to set flag (${res.status})`);
+      }
+      const updated = (await res.json()) as PreviewEntry;
+      setItems((prev) =>
+        prev.map((p) => (p.slug === slug ? { ...p, ...updated } : p)),
+      );
+    },
+    [],
+  );
+
+  const toggleSort = (key: PreviewSortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir(key === "updatedAt" ? "desc" : "asc");
+    }
+  };
+
+  const sortedItems = [...items].sort((a, b) =>
+    comparePreviews(a, b, sortKey, sortDir),
+  );
+
+  const sortLabel = (key: PreviewSortKey) =>
+    sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : "";
 
   const signIn = (loginPath: string) => {
     const returnTo =
@@ -180,9 +361,10 @@ export function App() {
         <p className="sub">
           Branch names must end with{" "}
           <code>project-color-animal</code> (example:{" "}
-          <code>orbit-green-apple</code>).{" "}
-          <strong>Site branches</strong> lists every repo in the catalog from
-          GitLab; <strong>Previews</strong> shows deployed registry entries.
+          <code>orbit-green-apple</code>). Flag each tile as{" "}
+          <strong>Latest</strong>, <strong>Production</strong>, prototype,
+          deprecated, or broken so branches of the same project are easy to tell
+          apart. Deploy state (building / failed) still shows when not ready.
         </p>
 
         <nav className="main-tabs" aria-label="Primary">
@@ -381,11 +563,23 @@ export function App() {
                               </td>
                               <td>
                                 {b.previewCapable && b.inRegistry && b.preview ? (
-                                  <span
-                                    className={`pill status-${b.preview.status}`}
-                                  >
-                                    {b.preview.status}
-                                  </span>
+                                  <div className="status-row">
+                                    {b.preview.flag ? (
+                                      <span
+                                        className={`pill flag-${b.preview.flag}`}
+                                      >
+                                        {flagLabel(b.preview.flag)}
+                                      </span>
+                                    ) : null}
+                                    {(b.preview.status !== "ready" ||
+                                      !b.preview.flag) && (
+                                      <span
+                                        className={`pill status-${b.preview.status}`}
+                                      >
+                                        {b.preview.status}
+                                      </span>
+                                    )}
+                                  </div>
                                 ) : b.previewCapable ? (
                                   <span className="pill not-deployed">
                                     no preview
@@ -396,25 +590,17 @@ export function App() {
                               </td>
                               <td className="links-cell">
                                 {b.slug && b.preview && (
-                                  <>
-                                    <a
-                                      className="link"
-                                      href={b.preview.targetUrl}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                    >
-                                      Open preview
-                                    </a>
-                                    <a
-                                      className="link secondary"
-                                      href={`${basePath}/${b.slug}/`}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      title="Requires preview router on this host"
-                                    >
-                                      Site path
-                                    </a>
-                                  </>
+                                  <a
+                                    className="link"
+                                    href={previewHref(
+                                      b.slug,
+                                      b.preview.targetUrl,
+                                    )}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                  >
+                                    Open preview
+                                  </a>
                                 )}
                               </td>
                             </tr>
@@ -461,48 +647,77 @@ export function App() {
             !(error?.startsWith("SIGN_IN_REQUIRED:")) &&
             view === "tiles" && (
               <ul className="tiles">
-                {items.map((p) => (
-                  <li key={p.slug} className="tile">
-                    <div className="tile-title">{p.slug}</div>
-                    <div className="tile-meta">{p.projectPath}</div>
-                    <div className="tile-meta">
-                      <span className={`pill status-${p.status}`}>
-                        {p.status}
-                      </span>
-                      {p.archived && (
-                        <span className="pill archived">archived</span>
-                      )}
-                    </div>
-                    <div className="tile-meta branch">{p.branch}</div>
-                    {p.commitTitle && (
-                      <div className="tile-meta commit">{p.commitTitle}</div>
-                    )}
-                    {p.lastDeployAt && (
-                      <div className="tile-meta subtle">
-                        Deployed {new Date(p.lastDeployAt).toLocaleString()}
+                {items.map((p) => {
+                  const desc =
+                    p.description?.trim() ||
+                    p.commitTitle?.trim() ||
+                    null;
+                  const shotSrc = `/api/previews/${encodeURIComponent(p.slug)}/screenshot?v=${encodeURIComponent(p.screenshotAt ?? p.updatedAt)}`;
+                  return (
+                    <li key={p.slug} className="tile">
+                      <a
+                        className="tile-shot"
+                        href={previewHref(p.slug, p.targetUrl)}
+                        target="_blank"
+                        rel="noreferrer"
+                        aria-label={`Open preview ${p.slug}`}
+                      >
+                        <img
+                          src={shotSrc}
+                          alt=""
+                          loading="lazy"
+                          onError={(e) => {
+                            const el = e.currentTarget;
+                            el.onerror = null;
+                            el.src =
+                              "data:image/svg+xml," +
+                              encodeURIComponent(
+                                `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540"><rect fill="#161f33" width="100%" height="100%"/><text x="50%" y="50%" fill="#9aa3c7" font-family="system-ui,sans-serif" font-size="28" text-anchor="middle" dominant-baseline="middle">No screenshot yet</text></svg>`,
+                              );
+                          }}
+                        />
+                      </a>
+                      <div className="tile-body">
+                        <div className="tile-title">{p.slug}</div>
+                        {desc && (
+                          <p className="tile-desc">{desc}</p>
+                        )}
+                        <div className="tile-meta">{p.projectPath}</div>
+                        <div className="tile-meta status-row">
+                          <FlagSelect
+                            slug={p.slug}
+                            flag={p.flag}
+                            onChange={setPreviewFlag}
+                          />
+                          {p.status !== "ready" && (
+                            <span className={`pill status-${p.status}`}>
+                              {p.status}
+                            </span>
+                          )}
+                          {p.archived && (
+                            <span className="pill archived">archived</span>
+                          )}
+                        </div>
+                        <div className="tile-meta branch">{p.branch}</div>
+                        {p.lastDeployAt && (
+                          <div className="tile-meta subtle">
+                            Deployed {new Date(p.lastDeployAt).toLocaleString()}
+                          </div>
+                        )}
+                        <div className="tile-actions">
+                          <a
+                            className="link"
+                            href={previewHref(p.slug, p.targetUrl)}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Open preview
+                          </a>
+                        </div>
                       </div>
-                    )}
-                    <div className="tile-actions">
-                      <a
-                        className="link"
-                        href={p.targetUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        Open preview
-                      </a>
-                      <a
-                        className="link secondary"
-                        href={`${basePath}/${p.slug}/`}
-                        target="_blank"
-                        rel="noreferrer"
-                        title="Requires preview router on this host"
-                      >
-                        Site path (router)
-                      </a>
-                    </div>
-                  </li>
-                ))}
+                    </li>
+                  );
+                })}
               </ul>
             )}
 
@@ -513,28 +728,58 @@ export function App() {
                 <table className="data-table">
                   <thead>
                     <tr>
-                      <th>Slug</th>
-                      <th>Project</th>
-                      <th>Branch</th>
-                      <th>Status</th>
-                      <th>Commit</th>
-                      <th>Updated</th>
+                      {(
+                        [
+                          ["slug", "Slug"],
+                          ["projectPath", "Project"],
+                          ["branch", "Branch"],
+                          ["status", "Flag"],
+                          ["commit", "Commit"],
+                          ["updatedAt", "Updated"],
+                        ] as const
+                      ).map(([key, label]) => (
+                        <th key={key} aria-sort={sortKey === key ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
+                          <button
+                            type="button"
+                            className={
+                              sortKey === key
+                                ? "th-sort active"
+                                : "th-sort"
+                            }
+                            onClick={() => toggleSort(key)}
+                          >
+                            {label}
+                            <span className="th-sort-ind" aria-hidden>
+                              {sortLabel(key)}
+                            </span>
+                          </button>
+                        </th>
+                      ))}
                       <th>Links</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {items.map((p) => (
+                    {sortedItems.map((p) => (
                       <tr key={p.slug}>
                         <td className="mono">{p.slug}</td>
                         <td>{p.projectPath}</td>
                         <td className="mono subtle">{p.branch}</td>
                         <td>
-                          <span className={`pill status-${p.status}`}>
-                            {p.status}
-                          </span>
-                          {p.archived && (
-                            <span className="pill archived">archived</span>
-                          )}
+                          <div className="status-row">
+                            <FlagSelect
+                              slug={p.slug}
+                              flag={p.flag}
+                              onChange={setPreviewFlag}
+                            />
+                            {p.status !== "ready" && (
+                              <span className={`pill status-${p.status}`}>
+                                {p.status}
+                              </span>
+                            )}
+                            {p.archived && (
+                              <span className="pill archived">archived</span>
+                            )}
+                          </div>
                         </td>
                         <td className="commit-cell">
                           {p.commitSha && (
@@ -552,20 +797,11 @@ export function App() {
                         <td className="links-cell">
                           <a
                             className="link"
-                            href={p.targetUrl}
+                            href={previewHref(p.slug, p.targetUrl)}
                             target="_blank"
                             rel="noreferrer"
                           >
                             Open preview
-                          </a>
-                          <a
-                            className="link secondary"
-                            href={`${basePath}/${p.slug}/`}
-                            target="_blank"
-                            rel="noreferrer"
-                            title="Requires preview router on this host"
-                          >
-                            Site path
                           </a>
                         </td>
                       </tr>

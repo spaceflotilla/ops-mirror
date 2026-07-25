@@ -91,6 +91,7 @@ export function previewEntryFromPush(d: PushDispatch): PreviewEntry | null {
     branch: d.branch,
     commitSha: d.commitSha,
     commitTitle: d.commitTitle,
+    description: d.commitTitle,
     targetUrl: "https://placeholder.invalid",
     status: "pending",
     archived: false,

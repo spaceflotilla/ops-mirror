@@ -5,6 +5,7 @@
     "web/trades",
     "web/orbit",
     "web/react_deck",
-    "web/astrolabe"
+    "web/astrolabe",
+    "web/ops"
   ]
 }

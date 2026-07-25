@@ -1,6 +1,12 @@
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import httpProxy from "http-proxy";
-import { PREVIEW_SLUG_REGEX, type PreviewEntry } from "@flotilla/shared";
+import {
+  HANDOFF_QUERY,
+  PREVIEW_SLUG_REGEX,
+  stripHandoffFromUrl,
+  verifyHandoffToken,
+  type PreviewEntry,
+} from "@flotilla/shared";
 import {
   loadRouterAuth,
   loginRedirectUrl,
@@ -50,6 +56,27 @@ function stripSlugFromRawUrl(rawUrl: string, slug: string): string {
   return `${path}${query}`;
 }
 
+/**
+ * If targetUrl is https://host/orbit/, keep `/orbit` when forwarding
+ * so HostGator (or any subpath deploy) resolves assets correctly.
+ */
+function joinTargetPath(targetUrl: URL, strippedPathAndQuery: string): string {
+  const q = strippedPathAndQuery.indexOf("?");
+  const pathOnly =
+    q >= 0 ? strippedPathAndQuery.slice(0, q) : strippedPathAndQuery;
+  const query = q >= 0 ? strippedPathAndQuery.slice(q) : "";
+  const base = targetUrl.pathname.replace(/\/$/, "");
+  let path: string;
+  if (!pathOnly || pathOnly === "/") {
+    path = base ? `${base}/` : "/";
+  } else if (!base) {
+    path = pathOnly.startsWith("/") ? pathOnly : `/${pathOnly}`;
+  } else {
+    path = `${base}${pathOnly.startsWith("/") ? pathOnly : `/${pathOnly}`}`;
+  }
+  return `${path}${query}`;
+}
+
 function requestFullUrl(request: FastifyRequest): string {
   const xf = request.headers["x-forwarded-proto"];
   const proto = (Array.isArray(xf) ? xf[0] : xf) ?? "http";
@@ -72,6 +99,20 @@ async function main() {
 
   app.all("/*", async (request: FastifyRequest, reply: FastifyReply) => {
     const rawPath = request.raw.url?.split("?")[0] ?? "/";
+
+    // Consume cross-origin login handoff from orchestrator (different Railway host).
+    if (!authCfg.authDisabled) {
+      const q = request.query as Record<string, string | undefined>;
+      const handoff = q[HANDOFF_QUERY];
+      if (typeof handoff === "string" && handoff.length > 0) {
+        const verified = verifyHandoffToken(handoff, authCfg.sessionSecret);
+        if (verified && previewUserAllowed(verified.email, authCfg)) {
+          request.session.set("userEmail", verified.email);
+          const clean = stripHandoffFromUrl(requestFullUrl(request));
+          return reply.redirect(clean);
+        }
+      }
+    }
 
     const segments = rawPath.split("/").filter(Boolean);
     const slug = segments[0];
@@ -99,7 +140,8 @@ async function main() {
     }
 
     const target = new URL(entry.targetUrl);
-    const outgoingPath = stripSlugFromRawUrl(request.raw.url ?? "/", slug);
+    const stripped = stripSlugFromRawUrl(request.raw.url ?? "/", slug);
+    const outgoingPath = joinTargetPath(target, stripped);
 
     reply.hijack();
 

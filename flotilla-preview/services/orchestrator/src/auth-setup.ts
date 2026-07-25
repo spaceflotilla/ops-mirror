@@ -6,7 +6,7 @@ const GOOGLE_OAUTH_AUTH = {
   tokenHost: "https://www.googleapis.com",
   tokenPath: "/oauth2/v4/token",
 } as const;
-import { isEmailAllowed, parseList } from "@flotilla/shared";
+import { isEmailAllowed, parseList, appendHandoffToUrl } from "@flotilla/shared";
 import { sessionKeyFromSecret } from "./session-key.js";
 
 export type AuthEnv = {
@@ -251,8 +251,21 @@ export async function registerAuthPlugins(
       }
       request.session.set("userEmail", email);
       const returnTo =
-        request.session.get("oauthReturnTo") ?? fallbackHome;
+        (request.session.get("oauthReturnTo") as string | undefined) ??
+        fallbackHome;
       request.session.set("oauthReturnTo", undefined);
+      // Cross-origin return (preview router on another host): pass a short-lived handoff.
+      try {
+        const dest = new URL(returnTo);
+        const self = new URL(resolved.publicBaseUrl);
+        if (dest.origin !== self.origin) {
+          return reply.redirect(
+            appendHandoffToUrl(returnTo, email, resolved.sessionSecret),
+          );
+        }
+      } catch {
+        /* fall through */
+      }
       return reply.redirect(returnTo);
     } catch (err) {
       request.log.error({ err }, "oauth callback failed");

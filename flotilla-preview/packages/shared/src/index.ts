@@ -5,6 +5,14 @@ export {
   parseList,
 } from "./auth-allowlist.js";
 
+export {
+  HANDOFF_QUERY,
+  appendHandoffToUrl,
+  createHandoffToken,
+  stripHandoffFromUrl,
+  verifyHandoffToken,
+} from "./handoff.js";
+
 /** Path segment: project-color-animal (lowercase kebab) */
 export const PREVIEW_SLUG_REGEX =
   /^[a-z0-9][a-z0-9-]*-[a-z]+-[a-z]+$/;
@@ -19,6 +27,25 @@ export const PreviewStatusSchema = z.enum([
 
 export type PreviewStatus = z.infer<typeof PreviewStatusSchema>;
 
+/** User-set label to distinguish branches of the same project (not deploy state). */
+export const PreviewFlagSchema = z.enum([
+  "latest",
+  "production",
+  "prototype",
+  "deprecated",
+  "broken",
+]);
+
+export type PreviewFlag = z.infer<typeof PreviewFlagSchema>;
+
+export const PREVIEW_FLAG_LABELS: Record<PreviewFlag, string> = {
+  latest: "Latest",
+  production: "Production",
+  prototype: "Prototype",
+  deprecated: "Deprecated",
+  broken: "Broken",
+};
+
 export const PreviewEntrySchema = z.object({
   slug: z.string().regex(PREVIEW_SLUG_REGEX),
   /** GitLab project path, e.g. flotilla/orbit */
@@ -27,15 +54,21 @@ export const PreviewEntrySchema = z.object({
   branch: z.string(),
   commitSha: z.string().optional(),
   commitTitle: z.string().optional(),
+  /** Human summary for tiles (defaults to commit title) */
+  description: z.string().optional(),
   /** Where the static / SSR preview actually runs (Railway public URL) */
   targetUrl: z.string().url(),
   status: PreviewStatusSchema,
   archived: z.boolean(),
+  /** Curated branch role — set by humans in the dashboard */
+  flag: PreviewFlagSchema.optional(),
   /** ISO timestamps */
   createdAt: z.string(),
   updatedAt: z.string(),
   lastDeployAt: z.string().optional(),
   lastError: z.string().optional(),
+  /** When a tile screenshot was last captured for this preview */
+  screenshotAt: z.string().optional(),
 });
 
 export type PreviewEntry = z.infer<typeof PreviewEntrySchema>;

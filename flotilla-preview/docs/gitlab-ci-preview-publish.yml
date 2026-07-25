@@ -1,0 +1,39 @@
+# Drop into a site repo as `.gitlab-ci.yml` (or include remotely).
+# On push to a preview branch (project-color-animal), pack + publish to ops-mirror.
+# Requires CI variables: INTERNAL_API_TOKEN, ORCHESTRATOR_URL (optional).
+#
+# Does NOT create new Railway services — snapshots live on the ops volume.
+
+stages:
+  - publish_preview
+
+publish_preview:
+  stage: publish_preview
+  image: node:22-bookworm-slim
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /^[a-z0-9][a-z0-9-]*-[a-z]+-[a-z]+$/'
+  script:
+    - apt-get update -qq && apt-get install -y -qq tar >/dev/null
+    - |
+      node <<'NODE'
+      const { execFileSync } = require('child_process');
+      const { readFileSync, mkdtempSync, rmSync } = require('fs');
+      const { tmpdir } = require('os');
+      const { join } = require('path');
+      const slug = process.env.CI_COMMIT_BRANCH;
+      const orch = (process.env.ORCHESTRATOR_URL || 'https://ops-mirror-production.up.railway.app').replace(/\/$/,'');
+      const token = process.env.INTERNAL_API_TOKEN;
+      if (!token) { console.error('INTERNAL_API_TOKEN missing'); process.exit(1); }
+      const tmp = mkdtempSync(join(tmpdir(), 'pub-'));
+      const tar = join(tmp, 'site.tar.gz');
+      const excludes = ['--exclude=.git','--exclude=node_modules','--exclude=sprites','--exclude=textures/tiles','--exclude=*.mp4','--exclude=*.gltf'];
+      execFileSync('tar', ['-czf', tar, '-C', process.cwd(), ...excludes, '.'], {stdio:'inherit'});
+      const buf = readFileSync(tar);
+      console.log('upload', (buf.length/1e6).toFixed(2), 'MB');
+      fetch(`${orch}/api/previews/${encodeURIComponent(slug)}/publish`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/gzip' },
+        body: buf,
+      }).then(async (r) => { console.log(await r.text()); if (!r.ok) process.exit(1); rmSync(tmp,{recursive:true,force:true}); });
+      NODE
+  # Webhook already registered the tile as "building"; publish flips it to ready.
