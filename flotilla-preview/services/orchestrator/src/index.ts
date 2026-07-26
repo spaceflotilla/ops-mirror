@@ -32,6 +32,8 @@ import {
   previewsRootFromRegistry,
   publishTarGz,
 } from "./preview-snapshots.js";
+import { registerOrbitAssetProxy } from "./orbit-asset-proxy.js";
+import { registerHorizonsProxy } from "./horizons-proxy.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -127,6 +129,11 @@ async function main() {
   });
 
   await registerAuthPlugins(app, authEnv);
+
+  // HostGator /orbit lacks ACAO — preview packs load sprites/GLTF/8K via this proxy.
+  await registerOrbitAssetProxy(app);
+  // JPL Horizons also lacks ACAO — browser ephemeris updates go through this proxy.
+  await registerHorizonsProxy(app);
 
   app.get("/health", async () => ({
     ok: true,
@@ -442,6 +449,7 @@ async function main() {
         url.startsWith("/webhooks") ||
         url.startsWith("/auth") ||
         url.startsWith("/p/") ||
+        url.startsWith("/asset-proxy") ||
         url === "/health"
       ) {
         return reply.code(404).send({ error: "not found" });

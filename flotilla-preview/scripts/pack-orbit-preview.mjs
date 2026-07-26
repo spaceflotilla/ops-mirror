@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 /**
- * Build a same-origin orbit preview pack (UTF-8 safe).
- * Includes code, planet + 2K/8K earth textures, bump, and local TLE fallbacks.
- * Excludes sprites/tiles (too large / HostGator CORS).
+ * Build an orbit preview pack (UTF-8 safe).
+ * Includes code + small same-origin textures (2K Earth, planets, moon)
+ * and a curated sprites/ set (skip huge GIFs — those load via asset proxy).
+ * GLTF / 8K / oversized sprites load via ops-mirror /asset-proxy/orbit
+ * (CORS-safe reverse proxy to HostGator). Does not pack tle/.
  *
  *   node pack-orbit-preview.mjs <orbitSrc> <outDir>
+ *   ORBIT_ASSET_BASE=https://...  (optional override)
  */
 import {
   cpSync,
@@ -42,27 +45,55 @@ if (existsSync(pkg)) {
 }
 
 mkdirSync(join(out, "textures"), { recursive: true });
+const skipTexture = (name) =>
+  name === "README.md" || /8k/i.test(name) || name === "tiles";
 for (const ent of readdirSync(join(src, "textures"), { withFileTypes: true })) {
   if (!ent.isFile()) continue;
-  if (ent.name === "README.md") continue;
+  if (skipTexture(ent.name)) continue;
   copyFileSync(join(src, "textures", ent.name), join(out, "textures", ent.name));
 }
 
-const tleSrc = join(src, "tle");
-if (existsSync(tleSrc)) {
-  mkdirSync(join(out, "tle"), { recursive: true });
-  for (const ent of readdirSync(tleSrc, { withFileTypes: true })) {
-    if (!ent.isFile() || !ent.name.endsWith(".tle")) continue;
-    copyFileSync(join(tleSrc, ent.name), join(out, "tle", ent.name));
+const spritesSrc = join(src, "sprites");
+const packedSpriteNames = [];
+if (existsSync(spritesSrc)) {
+  mkdirSync(join(out, "sprites"), { recursive: true });
+  const MAX_SPRITE_BYTES = 900 * 1024; // ~0.9 MB
+  let skipped = 0;
+  for (const ent of readdirSync(spritesSrc, { withFileTypes: true })) {
+    if (!ent.isFile()) continue;
+    const fp = join(spritesSrc, ent.name);
+    const sz = statSync(fp).size;
+    if (sz > MAX_SPRITE_BYTES) {
+      skipped += 1;
+      continue;
+    }
+    copyFileSync(fp, join(out, "sprites", ent.name));
+    packedSpriteNames.push(ent.name);
   }
+  console.log(
+    `sprites packed: ${packedSpriteNames.length} (skipped ${skipped} oversized)`,
+  );
 }
 
+// No tle/ — CelesTrak only; pack must not ship offline TLE fallbacks.
+
 // UTF-8 only — never PowerShell Set-Content (mojibake).
-// No HostGator rewrite: pack is self-contained for textures + TLE.
+// Default: CORS-friendly ops proxy (HG production has no Access-Control-Allow-Origin).
+const assetBase = (
+  process.env.ORBIT_ASSET_BASE ||
+  "https://ops-mirror-production.up.railway.app/asset-proxy/orbit/"
+).replace(/\/?$/, "/");
 const html = readFileSync(join(src, "index.html"), "utf8");
 const bridge = `<script>
-/* orbit preview: same-origin assets (textures/, tle/); no HG rewrite */
-window.__ORBIT_ASSET_BASE__ = "";
+/* orbit preview: 2K textures + packed sprites same-origin; oversized sprites/gltf/8k via ops CORS proxy → HG */
+window.__ORBIT_ASSET_BASE__ = ${JSON.stringify(assetBase)};
+window.__ORBIT_PACKED_SPRITES__ = ${JSON.stringify(packedSpriteNames)};
+window.__ORBIT_HORIZONS_PROXY__ = ${JSON.stringify(
+  (
+    process.env.ORBIT_HORIZONS_PROXY ||
+    "https://ops-mirror-production.up.railway.app/asset-proxy/horizons"
+  ).replace(/\/?$/, ""),
+)};
 </script>
 `;
 const injected = html.includes("<head>")

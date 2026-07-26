@@ -6,3 +6,5 @@ data/*.json
 .git
 .env
 *.md
+_orbit-*-pack
+_terminator-shots
